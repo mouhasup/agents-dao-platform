@@ -1,0 +1,10 @@
+.git
+.gitignore
+node_modules
+web/node_modules
+web/.next
+web/types
+web/tsconfig.tsbuildinfo
+web/build
+web/out
+api/bin

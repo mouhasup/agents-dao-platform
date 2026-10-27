@@ -1,0 +1,9 @@
+node_modules
+.next
+types
+.git
+.gitignore
+build
+dist
+out
+tsconfig.tsbuildinfo

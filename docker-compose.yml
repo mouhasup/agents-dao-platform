@@ -1,0 +1,79 @@
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: agents_dao_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: agents_dao_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agents_dao_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dao_network
+
+  # Backend Go (Gin & GORM)
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: agents_dao_api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgrespassword
+      - DB_NAME=agents_dao_db
+      - DB_SSLMODE=disable
+      - FRONTEND_URL=http://localhost:3000
+    env_file:
+      - ./api/.env
+    volumes:
+      - ./api/server:/app/server
+      - ./api/.env:/app/.env
+      - ./api/service-account.json:/app/service-account.json
+      - ./api/credentials.json:/app/credentials.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dao_network
+
+  # Frontend Next.js
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: agents_dao_web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+    volumes:
+      - ./web/.next/standalone:/app
+      - ./web/.next/static:/app/.next/static
+      - ./web/public:/app/public
+    depends_on:
+      - api
+    networks:
+      - dao_network
+
+volumes:
+  postgres_data:
+
+networks:
+  dao_network:
+    driver: bridge
