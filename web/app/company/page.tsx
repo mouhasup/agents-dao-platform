@@ -30,6 +30,7 @@ export default function CompanySettingsPage() {
   // Initialisation & Synchronisation Drive Workspace
   const [initializingWorkspace, setInitializingWorkspace] = useState(false);
   const [syncingDrive, setSyncingDrive] = useState(false);
+  const [organizingVault, setOrganizingVault] = useState(false);
   const [analyzingAllCVs, setAnalyzingAllCVs] = useState(false);
   const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null);
   const [workspaceMsg, setWorkspaceMsg] = useState<{ text: string; error?: boolean } | null>(null);
@@ -108,6 +109,28 @@ export default function CompanySettingsPage() {
       setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
     } finally {
       setSyncingDrive(false);
+    }
+  };
+
+  const handleOrganizeVault = async () => {
+    setOrganizingVault(true);
+    setWorkspaceMsg(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/company/organize-drive`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWorkspaceMsg({ text: data.message });
+        await fetchProfile();
+      } else {
+        setWorkspaceMsg({ text: data.error || "Erreur lors de la réorganisation du coffre-fort.", error: true });
+      }
+    } catch {
+      setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
+    } finally {
+      setOrganizingVault(false);
     }
   };
 
@@ -322,12 +345,23 @@ export default function CompanySettingsPage() {
                 <button
                   type="button"
                   onClick={handleSyncDrive}
-                  disabled={syncingDrive || analyzingAllCVs}
+                  disabled={syncingDrive || analyzingAllCVs || organizingVault}
                   title="Scanner le dossier 01_COFFRE_FORT_ENTREPRISE sur Google Drive et importer automatiquement les CVs et documents"
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all cursor-pointer shadow-sm disabled:opacity-50"
                 >
                   <RefreshCw size={14} className={syncingDrive ? "animate-spin text-indigo-400" : "text-slate-400"} />
                   <span>{syncingDrive ? "Synchronisation..." : "Synchroniser depuis Google Drive"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOrganizeVault}
+                  disabled={organizingVault || syncingDrive || analyzingAllCVs}
+                  title="Créer automatiquement les 5 sous-dossiers thématiques sur Drive et y classer toutes les pièces du coffre-fort"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  <FolderTree size={14} className={organizingVault ? "animate-spin text-emerald-400" : "text-emerald-400"} />
+                  <span>{organizingVault ? "Classement en cours..." : "Organiser le Coffre-fort Drive"}</span>
                 </button>
 
                 <button
@@ -411,6 +445,100 @@ export default function CompanySettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Arborescence Thématique du Coffre-fort Drive */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+              <FolderTree size={16} className="text-indigo-600" />
+              Sous-Dossiers Thématiques du Coffre-fort Drive (01_COFFRE_FORT_ENTREPRISE)
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Vos pièces sont automatiquement classées dans les 5 sous-dossiers réglementaires sur votre Google Drive. Cliquez sur un dossier pour filtrer l&apos;affichage.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {[
+            {
+              id: "ATTESTATION_FISCALE_SOCIALE",
+              folderName: "01_Juridique_et_Fiscal",
+              label: "Juridique & Fiscal",
+              desc: "NINEA, RCCM, Quitus, CSS, IPRES",
+              count: (profile?.documents || []).filter(d => d.type_doc === "ATTESTATION_FISCALE_SOCIALE" || d.type_doc === "AUTRE").length,
+              color: "text-amber-800 bg-amber-50/70 border-amber-200 hover:border-amber-300",
+              activeColor: "ring-2 ring-amber-500 bg-amber-100",
+              badgeColor: "bg-amber-200 text-amber-900",
+            },
+            {
+              id: "CV_EXPERT",
+              folderName: "02_Ressources_Humaines_et_CV",
+              label: "RH & CVs d'Experts",
+              desc: "CVs, diplômes, encadrement BTP",
+              count: (profile?.documents || []).filter(d => d.type_doc === "CV_EXPERT").length,
+              color: "text-blue-800 bg-blue-50/70 border-blue-200 hover:border-blue-300",
+              activeColor: "ring-2 ring-blue-500 bg-blue-100",
+              badgeColor: "bg-blue-200 text-blue-900",
+            },
+            {
+              id: "REFERENCE_SERVICE_FAIT",
+              folderName: "03_References_et_Attestations",
+              label: "Références & Chantiers",
+              desc: "Attestations de bonne fin, PVs",
+              count: (profile?.documents || []).filter(d => d.type_doc === "REFERENCE_SERVICE_FAIT").length,
+              color: "text-emerald-800 bg-emerald-50/70 border-emerald-200 hover:border-emerald-300",
+              activeColor: "ring-2 ring-emerald-500 bg-emerald-100",
+              badgeColor: "bg-emerald-200 text-emerald-900",
+            },
+            {
+              id: "JUSTIFICATIF_MATERIEL",
+              folderName: "04_Materiels_et_Equipements",
+              label: "Matériel & Engins",
+              desc: "Cartes grises, baux, factures",
+              count: (profile?.documents || []).filter(d => d.type_doc === "JUSTIFICATIF_MATERIEL").length,
+              color: "text-purple-800 bg-purple-50/70 border-purple-200 hover:border-purple-300",
+              activeColor: "ring-2 ring-purple-500 bg-purple-100",
+              badgeColor: "bg-purple-200 text-purple-900",
+            },
+            {
+              id: "BILAN_FINANCIER",
+              folderName: "05_Finances_et_Banque",
+              label: "Finances & Banques",
+              desc: "Bilans ONECCA, lignes de crédit",
+              count: (profile?.documents || []).filter(d => d.type_doc === "BILAN_FINANCIER").length,
+              color: "text-cyan-800 bg-cyan-50/70 border-cyan-200 hover:border-cyan-300",
+              activeColor: "ring-2 ring-cyan-500 bg-cyan-100",
+              badgeColor: "bg-cyan-200 text-cyan-900",
+            },
+          ].map((item) => {
+            const isSelected = selectedCategory === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelectedCategory(isSelected ? "ALL" : item.id)}
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 shadow-xs ${item.color} ${isSelected ? item.activeColor : ""}`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-mono text-[10px] font-bold opacity-75 truncate">{item.folderName}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${item.badgeColor}`}>
+                      {item.count}
+                    </span>
+                  </div>
+                  <h3 className="text-xs font-bold mt-1 text-slate-900 leading-tight">{item.label}</h3>
+                  <p className="text-[11px] opacity-80 mt-0.5 leading-snug">{item.desc}</p>
+                </div>
+                <div className="text-[10px] font-semibold flex items-center gap-1 opacity-75 pt-1 border-t border-black/5">
+                  <span>{isSelected ? "Filtre actif ✓" : "Filtrer ce dossier"}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Documents RAG indexés */}
       <div className="space-y-4">

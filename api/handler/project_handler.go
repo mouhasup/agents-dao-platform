@@ -456,7 +456,38 @@ func (h *ProjectHandler) UpdateCompanyDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, targetDoc)
 }
 
-// UploadCompanyDocument gère POST /api/company/documents/upload (multipart, téléversement direct Drive dans 01_COFFRE_FORT_ENTREPRISE)
+// getVaultSubfolderForDoc détermine le nom du sous-dossier thématique pour un type de document donné
+func getVaultSubfolderForDoc(typeDoc model.TypeDocumentEntreprise, fileName, titre string) string {
+	lower := strings.ToLower(fileName + " " + titre)
+	switch typeDoc {
+	case model.DocCV:
+		return "02_Ressources_Humaines_et_CV"
+	case model.DocReference:
+		return "03_References_et_Attestations"
+	case model.DocMateriel:
+		return "04_Materiels_et_Equipements"
+	case model.DocBilan:
+		return "05_Finances_et_Banque"
+	case model.DocAttestation:
+		return "01_Juridique_et_Fiscal"
+	default:
+		if strings.Contains(lower, "cv") || strings.Contains(lower, "expert") || strings.Contains(lower, "curriculum") || strings.Contains(lower, "ingenieur") {
+			return "02_Ressources_Humaines_et_CV"
+		}
+		if strings.Contains(lower, "reference") || strings.Contains(lower, "bonne_fin") || strings.Contains(lower, "chantier") || strings.Contains(lower, "pv") {
+			return "03_References_et_Attestations"
+		}
+		if strings.Contains(lower, "materiel") || strings.Contains(lower, "engin") || strings.Contains(lower, "carte_grise") || strings.Contains(lower, "camion") {
+			return "04_Materiels_et_Equipements"
+		}
+		if strings.Contains(lower, "bilan") || strings.Contains(lower, "financier") || strings.Contains(lower, "banque") || strings.Contains(lower, "credit") {
+			return "05_Finances_et_Banque"
+		}
+		return "01_Juridique_et_Fiscal"
+	}
+}
+
+// UploadCompanyDocument gère POST /api/company/documents/upload (multipart, téléversement classé dans les sous-dossiers de 01_COFFRE_FORT_ENTREPRISE)
 func (h *ProjectHandler) UploadCompanyDocument(c *gin.Context) {
 	token := h.requireToken(c)
 	if token == nil {
@@ -514,12 +545,6 @@ func (h *ProjectHandler) UploadCompanyDocument(c *gin.Context) {
 		mimeType = "application/msword"
 	}
 
-	uploaded, err := h.driveService.UploadFile(c.Request.Context(), token, profile.RagFolderID, fh.Filename, mimeType, f)
-	if err != nil {
-		h.handleDriveError(c, err)
-		return
-	}
-
 	titre := strings.TrimSpace(c.PostForm("titre"))
 	if titre == "" {
 		titre = strings.TrimSuffix(fh.Filename, filepath.Ext(fh.Filename))
@@ -529,6 +554,22 @@ func (h *ProjectHandler) UploadCompanyDocument(c *gin.Context) {
 		typeDoc = "AUTRE"
 	}
 	desc := strings.TrimSpace(c.PostForm("description"))
+
+	// Cibler automatiquement le sous-dossier thématique approprié
+	targetFolderID := profile.RagFolderID
+	subfolders, sErr := h.driveService.EnsureVaultSubfolders(c.Request.Context(), token, profile.RagFolderID)
+	if sErr == nil && subfolders != nil {
+		targetSubName := getVaultSubfolderForDoc(model.TypeDocumentEntreprise(typeDoc), fh.Filename, titre)
+		if fID, exists := subfolders[targetSubName]; exists {
+			targetFolderID = fID
+		}
+	}
+
+	uploaded, err := h.driveService.UploadFile(c.Request.Context(), token, targetFolderID, fh.Filename, mimeType, f)
+	if err != nil {
+		h.handleDriveError(c, err)
+		return
+	}
 
 	var dateExp *time.Time
 	if expStr := strings.TrimSpace(c.PostForm("date_expiration")); expStr != "" {
@@ -554,6 +595,19 @@ func (h *ProjectHandler) UploadCompanyDocument(c *gin.Context) {
 		UpdatedAt:      time.Now(),
 	}
 
+	// Analyse sémantique immédiate si c'est un CV
+	if doc.TypeDoc == model.DocCV && uploaded.Id != "" {
+		if parsed, parseErr := h.parseCVContent(c.Request.Context(), token, uploaded.Id, fh.Filename); parseErr == nil && parsed != nil {
+			if parsed.NomComplet != "" {
+				doc.Titre = fmt.Sprintf("CV %s", parsed.NomComplet)
+			}
+			doc.Description = fmt.Sprintf("[%s] %s (%d ans d'exp.) - %s", parsed.SpecialitePrincipale, parsed.NomComplet, parsed.ExperienceAnnees, parsed.ResumeAnalytique)
+			if metaBytes, mErr := json.Marshal(parsed); mErr == nil {
+				doc.MetadonneesJSON = string(metaBytes)
+			}
+		}
+	}
+
 	if err := h.projectRepo.AddCompanyDocument(doc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Erreur enregistrement métadonnées: %v", err)})
 		return
@@ -562,7 +616,7 @@ func (h *ProjectHandler) UploadCompanyDocument(c *gin.Context) {
 	c.JSON(http.StatusCreated, doc)
 }
 
-// SyncCompanyDriveDocuments gère POST /api/company/sync-drive
+// SyncCompanyDriveDocuments gère POST /api/company/sync-drive (scan récursif des sous-dossiers thématiques)
 func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 	token := h.requireToken(c)
 	if token == nil {
@@ -588,7 +642,8 @@ func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 		_ = h.projectRepo.UpdateCompanyProfile(profile)
 	}
 
-	driveFiles, err := h.driveService.ListFolderFiles(c.Request.Context(), token, profile.RagFolderID)
+	// S'assurer que les 5 sous-dossiers thématiques existent
+	subfolders, err := h.driveService.EnsureVaultSubfolders(c.Request.Context(), token, profile.RagFolderID)
 	if err != nil {
 		h.handleDriveError(c, err)
 		return
@@ -603,26 +658,22 @@ func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 	}
 
 	importedCount := 0
-	for _, f := range driveFiles {
+
+	// 1. Scanner les fichiers à la racine de 01_COFFRE_FORT_ENTREPRISE pour les classer dans les sous-dossiers
+	rootFiles, _ := h.driveService.ListFolderFiles(c.Request.Context(), token, profile.RagFolderID)
+	for _, f := range rootFiles {
 		if f.MimeType == "application/vnd.google-apps.folder" {
 			continue
 		}
-		if existingDriveIDs[f.Id] {
-			continue
+
+		typeDoc := deduceDocTypeFromName(f.Name)
+		targetSubName := getVaultSubfolderForDoc(typeDoc, f.Name, f.Name)
+		if targetFolderID, ok := subfolders[targetSubName]; ok {
+			_ = h.driveService.MoveFile(c.Request.Context(), token, f.Id, targetFolderID)
 		}
 
-		lowerName := strings.ToLower(f.Name)
-		typeDoc := model.DocAutre
-		if strings.Contains(lowerName, "cv") || strings.Contains(lowerName, "expert") || strings.Contains(lowerName, "curriculum") || strings.Contains(lowerName, "ingenieur") {
-			typeDoc = model.DocCV
-		} else if strings.Contains(lowerName, "quitus") || strings.Contains(lowerName, "fiscal") || strings.Contains(lowerName, "css") || strings.Contains(lowerName, "ipres") || strings.Contains(lowerName, "social") || strings.Contains(lowerName, "dgid") {
-			typeDoc = model.DocAttestation
-		} else if strings.Contains(lowerName, "reference") || strings.Contains(lowerName, "bonne_fin") || strings.Contains(lowerName, "attestation") || strings.Contains(lowerName, "chantier") {
-			typeDoc = model.DocReference
-		} else if strings.Contains(lowerName, "materiel") || strings.Contains(lowerName, "carte_grise") || strings.Contains(lowerName, "engin") || strings.Contains(lowerName, "camion") {
-			typeDoc = model.DocMateriel
-		} else if strings.Contains(lowerName, "bilan") || strings.Contains(lowerName, "financier") || strings.Contains(lowerName, "banque") || strings.Contains(lowerName, "credit") {
-			typeDoc = model.DocBilan
+		if existingDriveIDs[f.Id] {
+			continue
 		}
 
 		doc := &model.CompanyDocument{
@@ -636,7 +687,6 @@ func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 			FileName:      f.Name,
 		}
 
-		// Analyse sémantique immédiate si c'est un CV
 		if typeDoc == model.DocCV && f.Id != "" {
 			if parsed, parseErr := h.parseCVContent(c.Request.Context(), token, f.Id, f.Name); parseErr == nil && parsed != nil {
 				if parsed.NomComplet != "" {
@@ -651,12 +701,163 @@ func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 
 		if err := h.projectRepo.AddCompanyDocument(doc); err == nil {
 			importedCount++
+			existingDriveIDs[f.Id] = true
+		}
+	}
+
+	// 2. Scanner chaque sous-dossier thématique
+	subfolderTypeMap := map[string]model.TypeDocumentEntreprise{
+		"01_Juridique_et_Fiscal":       model.DocAttestation,
+		"02_Ressources_Humaines_et_CV": model.DocCV,
+		"03_References_et_Attestations": model.DocReference,
+		"04_Materiels_et_Equipements":  model.DocMateriel,
+		"05_Finances_et_Banque":        model.DocBilan,
+	}
+
+	for subName, subFolderID := range subfolders {
+		defaultType := subfolderTypeMap[subName]
+		files, fErr := h.driveService.ListFolderFiles(c.Request.Context(), token, subFolderID)
+		if fErr != nil {
+			continue
+		}
+
+		for _, f := range files {
+			if f.MimeType == "application/vnd.google-apps.folder" {
+				continue
+			}
+			if existingDriveIDs[f.Id] {
+				continue
+			}
+
+			typeDoc := defaultType
+			lowerName := strings.ToLower(f.Name)
+			if subName == "01_Juridique_et_Fiscal" {
+				if strings.Contains(lowerName, "ninea") || strings.Contains(lowerName, "rccm") || strings.Contains(lowerName, "statut") {
+					typeDoc = model.DocAutre
+				}
+			}
+
+			doc := &model.CompanyDocument{
+				ID:            fmt.Sprintf("doc-%d", time.Now().UnixNano()),
+				ProfileID:     profile.ID,
+				TypeDoc:       typeDoc,
+				Titre:         strings.TrimSuffix(f.Name, filepath.Ext(f.Name)),
+				Description:   fmt.Sprintf("Document synchronisé depuis %s (%s)", subName, f.Name),
+				GoogleDriveID: f.Id,
+				WebViewLink:   f.WebViewLink,
+				FileName:      f.Name,
+			}
+
+			if typeDoc == model.DocCV && f.Id != "" {
+				if parsed, parseErr := h.parseCVContent(c.Request.Context(), token, f.Id, f.Name); parseErr == nil && parsed != nil {
+					if parsed.NomComplet != "" {
+						doc.Titre = fmt.Sprintf("CV %s", parsed.NomComplet)
+					}
+					doc.Description = fmt.Sprintf("[%s] %s (%d ans d'exp.) - %s", parsed.SpecialitePrincipale, parsed.NomComplet, parsed.ExperienceAnnees, parsed.ResumeAnalytique)
+					if metaBytes, mErr := json.Marshal(parsed); mErr == nil {
+						doc.MetadonneesJSON = string(metaBytes)
+					}
+				}
+			}
+
+			if err := h.projectRepo.AddCompanyDocument(doc); err == nil {
+				importedCount++
+				existingDriveIDs[f.Id] = true
+			}
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":        fmt.Sprintf("%d document(s) synchronisé(s) depuis Google Drive (01_COFFRE_FORT_ENTREPRISE)", importedCount),
+		"message":        fmt.Sprintf("%d nouveau(x) document(s) synchronisé(s) et classé(s) dans le Coffre-fort Drive.", importedCount),
 		"imported_count": importedCount,
+	})
+}
+
+// deduceDocTypeFromName devine le type de document d'après le nom de fichier
+func deduceDocTypeFromName(name string) model.TypeDocumentEntreprise {
+	lowerName := strings.ToLower(name)
+	if strings.Contains(lowerName, "cv") || strings.Contains(lowerName, "expert") || strings.Contains(lowerName, "curriculum") || strings.Contains(lowerName, "ingenieur") {
+		return model.DocCV
+	} else if strings.Contains(lowerName, "quitus") || strings.Contains(lowerName, "fiscal") || strings.Contains(lowerName, "css") || strings.Contains(lowerName, "ipres") || strings.Contains(lowerName, "social") || strings.Contains(lowerName, "dgid") {
+		return model.DocAttestation
+	} else if strings.Contains(lowerName, "reference") || strings.Contains(lowerName, "bonne_fin") || strings.Contains(lowerName, "attestation") || strings.Contains(lowerName, "chantier") {
+		return model.DocReference
+	} else if strings.Contains(lowerName, "materiel") || strings.Contains(lowerName, "carte_grise") || strings.Contains(lowerName, "engin") || strings.Contains(lowerName, "camion") {
+		return model.DocMateriel
+	} else if strings.Contains(lowerName, "bilan") || strings.Contains(lowerName, "financier") || strings.Contains(lowerName, "banque") || strings.Contains(lowerName, "credit") {
+		return model.DocBilan
+	}
+	return model.DocAutre
+}
+
+// OrganizeCompanyVault gère POST /api/company/organize-drive (range tous les fichiers existants dans les sous-dossiers thématiques)
+func (h *ProjectHandler) OrganizeCompanyVault(c *gin.Context) {
+	token := h.requireToken(c)
+	if token == nil {
+		return
+	}
+
+	profile, err := h.projectRepo.GetCompanyProfile()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Impossible de charger le profil entreprise"})
+		return
+	}
+
+	if profile.RagFolderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Le coffre-fort d'entreprise n'est pas encore initialisé sur Google Drive."})
+		return
+	}
+
+	subfolders, err := h.driveService.EnsureVaultSubfolders(c.Request.Context(), token, profile.RagFolderID)
+	if err != nil {
+		h.handleDriveError(c, err)
+		return
+	}
+
+	docs, err := h.projectRepo.ListCompanyDocuments()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lecture des documents"})
+		return
+	}
+
+	movedCount := 0
+	subfolderCounts := make(map[string]int)
+
+	for _, doc := range docs {
+		if doc.GoogleDriveID == "" {
+			continue
+		}
+
+		targetSubName := getVaultSubfolderForDoc(doc.TypeDoc, doc.FileName, doc.Titre)
+		targetFolderID, exists := subfolders[targetSubName]
+		if !exists {
+			continue
+		}
+
+		if err := h.driveService.MoveFile(c.Request.Context(), token, doc.GoogleDriveID, targetFolderID); err == nil {
+			movedCount++
+			subfolderCounts[targetSubName]++
+		}
+	}
+
+	// Déplacer également les fichiers orphelins restant à la racine de 01_COFFRE_FORT_ENTREPRISE
+	rootFiles, _ := h.driveService.ListFolderFiles(c.Request.Context(), token, profile.RagFolderID)
+	for _, f := range rootFiles {
+		if f.MimeType == "application/vnd.google-apps.folder" {
+			continue
+		}
+		typeDoc := deduceDocTypeFromName(f.Name)
+		targetSubName := getVaultSubfolderForDoc(typeDoc, f.Name, f.Name)
+		if targetFolderID, ok := subfolders[targetSubName]; ok {
+			_ = h.driveService.MoveFile(c.Request.Context(), token, f.Id, targetFolderID)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         fmt.Sprintf("Coffre-fort réorganisé avec succès sur Google Drive (%d fichiers classés dans leurs sous-dossiers respectifs).", movedCount),
+		"organized_count": movedCount,
+		"subfolders":      subfolders,
+		"counts_by_sub":   subfolderCounts,
 	})
 }
 

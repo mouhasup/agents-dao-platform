@@ -23,8 +23,10 @@ type DriveService interface {
 	CreateProjectTree(ctx context.Context, token *oauth2.Token, rootFolderName string, parentID string) (string, map[string]string, error)
 	UploadFile(ctx context.Context, token *oauth2.Token, parentID, name, mimeType string, content io.Reader) (*drive.File, error)
 	EnsureWorkspaceTree(ctx context.Context, token *oauth2.Token, parentID string) (workspaceID, ragID, projectsID, workspaceURL string, err error)
+	EnsureVaultSubfolders(ctx context.Context, token *oauth2.Token, vaultFolderID string) (map[string]string, error)
 	CopyFile(ctx context.Context, token *oauth2.Token, fileID, destinationFolderID, newName string) (*drive.File, error)
 	MoveFolder(ctx context.Context, token *oauth2.Token, folderID, newParentID string) error
+	MoveFile(ctx context.Context, token *oauth2.Token, fileID, newParentID string) error
 }
 
 type driveService struct {
@@ -405,4 +407,53 @@ func (s *driveService) MoveFolder(ctx context.Context, token *oauth2.Token, fold
 	}
 
 	return nil
+}
+
+// MoveFile déplace un fichier Drive vers un nouveau dossier parent
+func (s *driveService) MoveFile(ctx context.Context, token *oauth2.Token, fileID, newParentID string) error {
+	return s.MoveFolder(ctx, token, fileID, newParentID)
+}
+
+// EnsureVaultSubfolders s'assure que les sous-dossiers thématiques existent dans 01_COFFRE_FORT_ENTREPRISE
+func (s *driveService) EnsureVaultSubfolders(ctx context.Context, token *oauth2.Token, vaultFolderID string) (map[string]string, error) {
+	srv, err := s.getClient(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+
+	subFolderNames := []string{
+		"01_Juridique_et_Fiscal",
+		"02_Ressources_Humaines_et_CV",
+		"03_References_et_Attestations",
+		"04_Materiels_et_Equipements",
+		"05_Finances_et_Banque",
+	}
+
+	result := make(map[string]string)
+
+	// Lister les dossiers existants dans vaultFolderID
+	q := fmt.Sprintf("mimeType = 'application/vnd.google-apps.folder' and trashed = false and '%s' in parents", vaultFolderID)
+	r, err := srv.Files.List().Context(ctx).Q(q).SupportsAllDrives(true).IncludeItemsFromAllDrives(true).Fields("files(id, name)").Do()
+	if err == nil && r != nil {
+		for _, f := range r.Files {
+			for _, name := range subFolderNames {
+				if f.Name == name {
+					result[name] = f.Id
+				}
+			}
+		}
+	}
+
+	// Créer les sous-dossiers manquants
+	for _, name := range subFolderNames {
+		if _, exists := result[name]; !exists {
+			f, createErr := s.CreateFolder(ctx, token, name, vaultFolderID)
+			if createErr != nil {
+				return nil, fmt.Errorf("impossible de créer le sous-dossier %s : %w", name, createErr)
+			}
+			result[name] = f.Id
+		}
+	}
+
+	return result, nil
 }

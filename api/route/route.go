@@ -63,6 +63,7 @@ func SetupRouter(hm *handler.HandlerManager, sm *service.ServiceManager, cfg *co
 		api.POST("/company/analyze-all-cvs", hm.Project.AnalyzeAllCompanyCVs)
 		api.POST("/company/documents/upload", hm.Project.UploadCompanyDocument)
 		api.POST("/company/sync-drive", hm.Project.SyncCompanyDriveDocuments)
+		api.POST("/company/organize-drive", hm.Project.OrganizeCompanyVault)
 
 		// Explorateur Google Drive
 		api.GET("/drive/folders", hm.Project.ListDriveFolders)
