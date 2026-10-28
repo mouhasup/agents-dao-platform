@@ -301,9 +301,24 @@ export default function CompanySettingsPage() {
     }
   };
 
+  const isPermanent = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const year = new Date(dateStr).getFullYear();
+    return year >= 2099;
+  };
+
   const isExpired = (dateStr?: string) => {
     if (!dateStr) return false;
+    if (isPermanent(dateStr)) return false;
     return new Date(dateStr) < new Date();
+  };
+
+  const filterDocByCategory = (doc: CompanyDocument, category: string) => {
+    if (category === "ALL") return true;
+    if (category === "ATTESTATION_FISCALE_SOCIALE" || category === "01_Juridique_et_Fiscal") {
+      return doc.type_doc === "ATTESTATION_FISCALE_SOCIALE" || doc.type_doc === "AUTRE";
+    }
+    return doc.type_doc === category;
   };
 
   return (
@@ -579,20 +594,20 @@ export default function CompanySettingsPage() {
               Tous ({profile?.documents?.length || 0})
             </button>
             <button
+              onClick={() => setSelectedCategory("ATTESTATION_FISCALE_SOCIALE")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                selectedCategory === "ATTESTATION_FISCALE_SOCIALE" ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+              }`}
+            >
+              Juridique & Fiscal ({profile?.documents?.filter(d => d.type_doc === "ATTESTATION_FISCALE_SOCIALE" || d.type_doc === "AUTRE").length || 0})
+            </button>
+            <button
               onClick={() => setSelectedCategory("CV_EXPERT")}
               className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
                 selectedCategory === "CV_EXPERT" ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
               }`}
             >
               CV & Personnel ({profile?.documents?.filter(d => d.type_doc === "CV_EXPERT").length || 0})
-            </button>
-            <button
-              onClick={() => setSelectedCategory("ATTESTATION_FISCALE_SOCIALE")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                selectedCategory === "ATTESTATION_FISCALE_SOCIALE" ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
-              }`}
-            >
-              Fiscale & Sociale ({profile?.documents?.filter(d => d.type_doc === "ATTESTATION_FISCALE_SOCIALE").length || 0})
             </button>
             <button
               onClick={() => setSelectedCategory("REFERENCE_SERVICE_FAIT")}
@@ -609,6 +624,14 @@ export default function CompanySettingsPage() {
               }`}
             >
               Matériel & Engins ({profile?.documents?.filter(d => d.type_doc === "JUSTIFICATIF_MATERIEL").length || 0})
+            </button>
+            <button
+              onClick={() => setSelectedCategory("BILAN_FINANCIER")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                selectedCategory === "BILAN_FINANCIER" ? "bg-cyan-600 text-white" : "bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200"
+              }`}
+            >
+              Finances & Banques ({profile?.documents?.filter(d => d.type_doc === "BILAN_FINANCIER").length || 0})
             </button>
           </div>
         </div>
@@ -634,9 +657,10 @@ export default function CompanySettingsPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {profile.documents
-              .filter((doc) => selectedCategory === "ALL" || doc.type_doc === selectedCategory)
+              .filter((doc) => filterDocByCategory(doc, selectedCategory))
               .map((doc) => {
               const expired = isExpired(doc.date_expiration);
+              const permanent = isPermanent(doc.date_expiration);
               let meta: any = null;
               if (doc.metadonnees_json) {
                 try { meta = JSON.parse(doc.metadonnees_json); } catch {}
@@ -650,10 +674,22 @@ export default function CompanySettingsPage() {
                     <div className="flex items-center justify-between gap-2">
                       {getDocTypeBadge(doc.type_doc)}
                       {doc.date_expiration && (
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md ${expired ? "bg-rose-50 text-rose-700 border border-rose-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                          permanent
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : expired
+                            ? "bg-rose-50 text-rose-700 border border-rose-200"
+                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        }`}>
                           <Calendar size={11} />
-                          {expired ? "Expiré : " : "Exp : "}
-                          {new Date(doc.date_expiration).toLocaleDateString("fr-FR")}
+                          {permanent ? (
+                            "Validité permanente"
+                          ) : (
+                            <>
+                              {expired ? "Expiré : " : "Exp : "}
+                              {new Date(doc.date_expiration).toLocaleDateString("fr-FR")}
+                            </>
+                          )}
                         </span>
                       )}
                     </div>

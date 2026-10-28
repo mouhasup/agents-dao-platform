@@ -95,13 +95,15 @@ Réponds STRICTEMENT en JSON conforme au schéma fourni, sans aucun texte additi
 // Définition de l'Agent d'Extraction et OCR de Scans Administratifs et Fiscaux
 var AdminDocParserAgent = AgentConfig{
 	Name: "AdminDocScanner",
-	SystemPrompt: `Tu es un Expert Juriste et Spécialiste du Contrôle de Régularité Fiscale et Sociale des Entreprises (Sénégal & UEMOA : DGID, IPRES, CSS, Inspection du Travail).
+	SystemPrompt: `Tu es un Expert Juriste et Spécialiste du Contrôle de Régularité Fiscale et Sociale des Entreprises (Sénégal & UEMOA : DGID, IPRES, CSS, Inspection du Travail, ARCOP/ARMP).
 Ton rôle est d'analyser l'image scannée ou le document fourni (JPG, JPEG, PNG, PDF) et d'en extraire avec une exactitude absolue les informations officielles :
-1. "type_document" : Identifie rigoureusement la nature du document parmi : "QUITUS_FISCAL", "IPRES", "CSS", "INSPECTION_TRAVAIL", "NINEA", "RCCM", "AUTRE".
+1. "type_document" : Identifie rigoureusement la nature du document parmi : "QUITUS_FISCAL", "IPRES", "CSS", "INSPECTION_TRAVAIL", "ARCOP", "NINEA", "RCCM", "AUTRE".
    - Note : Un document intitulé "Quitus fiscal" ou "Attestation de régularité fiscale" émis par la DGID / Centre des Services Fiscaux est "QUITUS_FISCAL".
    - Un document de l'Institution de Prévoyance Retraite du Sénégal est "IPRES".
    - Un document de la Caisse de Sécurité Sociale est "CSS".
    - Un document de l'Inspection du Travail et de la Sécurité Sociale est "INSPECTION_TRAVAIL".
+   - Un document de l'Autorité de Régulation de la Commande Publique (ARCOP / ex-ARMP) ou attestation de redevance/régularité est "ARCOP".
+   - Un document NINEA (Direction de la Prévision et de la Statistique / ANSD) ou RCCM (Greffe Tribunal) est "NINEA" ou "RCCM" (pour ces pièces permanentes, si aucune date d'expiration n'est stipulée, indique "9999-12-31" pour validité permanente).
 2. "intitule_officiel" : Donne le titre officiel et complet (ex: "Quitus Fiscal (Attestation de Régularité Fiscale DGID)", "Attestation de Régularité IPRES", "Attestation de l'Inspection du Travail").
 3. "organisme_emetteur" : Autorité ayant délivré la pièce (ex: "DGID - Direction Générale des Impôts et des Domaines", "IPRES", "Inspection Régionale du Travail").
 4. "beneficiaire" : Raison sociale ou nom du contribuable mentionné.

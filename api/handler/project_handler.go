@@ -814,7 +814,7 @@ func deduceDocTypeFromName(name string) model.TypeDocumentEntreprise {
 	lowerName := strings.ToLower(name)
 	if strings.Contains(lowerName, "cv") || strings.Contains(lowerName, "expert") || strings.Contains(lowerName, "curriculum") || strings.Contains(lowerName, "ingenieur") {
 		return model.DocCV
-	} else if strings.Contains(lowerName, "quitus") || strings.Contains(lowerName, "fiscal") || strings.Contains(lowerName, "css") || strings.Contains(lowerName, "ipres") || strings.Contains(lowerName, "social") || strings.Contains(lowerName, "dgid") {
+	} else if strings.Contains(lowerName, "quitus") || strings.Contains(lowerName, "fiscal") || strings.Contains(lowerName, "css") || strings.Contains(lowerName, "ipres") || strings.Contains(lowerName, "social") || strings.Contains(lowerName, "dgid") || strings.Contains(lowerName, "arcop") || strings.Contains(lowerName, "armp") || strings.Contains(lowerName, "travail") || strings.Contains(lowerName, "inspection") || strings.Contains(lowerName, "it ") || strings.HasPrefix(lowerName, "it") {
 		return model.DocAttestation
 	} else if strings.Contains(lowerName, "reference") || strings.Contains(lowerName, "bonne_fin") || strings.Contains(lowerName, "attestation") || strings.Contains(lowerName, "chantier") {
 		return model.DocReference

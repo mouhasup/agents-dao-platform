@@ -215,9 +215,9 @@ type ExtractedCVProfile struct {
 
 // ExtractedAdminDocProfile structure les informations extraites d'un scan administratif ou fiscal
 type ExtractedAdminDocProfile struct {
-	TypeDocument      string `json:"type_document"`      // "QUITUS_FISCAL", "IPRES", "CSS", "INSPECTION_TRAVAIL", "NINEA", "RCCM", "AUTRE"
+	TypeDocument      string `json:"type_document"`      // "QUITUS_FISCAL", "IPRES", "CSS", "INSPECTION_TRAVAIL", "ARCOP", "NINEA", "RCCM", "AUTRE"
 	IntituleOfficiel  string `json:"intitule_officiel"`  // ex: "Quitus Fiscal (Attestation de Régularité Fiscale DGID)"
-	OrganismeEmetteur string `json:"organisme_emetteur"` // ex: "DGID", "IPRES", "Caisse de Sécurité Sociale (CSS)", "Inspection du Travail"
+	OrganismeEmetteur string `json:"organisme_emetteur"` // ex: "DGID", "IPRES", "Caisse de Sécurité Sociale (CSS)", "Inspection du Travail", "ARCOP"
 	Beneficiaire      string `json:"beneficiaire"`       // Raison sociale ou NINEA
 	DateEmission      string `json:"date_emission"`      // Format AAAA-MM-JJ
 	DateExpiration    string `json:"date_expiration"`    // Format AAAA-MM-JJ (obligatoire : date limite ou fin de trimestre)
@@ -231,7 +231,7 @@ var AdminDocParserSchema = &genai.Schema{
 	Properties: map[string]*genai.Schema{
 		"type_document": {
 			Type:        genai.TypeString,
-			Description: "Type exact du document: QUITUS_FISCAL, IPRES, CSS, INSPECTION_TRAVAIL, NINEA, RCCM, ou AUTRE",
+			Description: "Type exact du document: QUITUS_FISCAL, IPRES, CSS, INSPECTION_TRAVAIL, ARCOP, NINEA, RCCM, ou AUTRE",
 		},
 		"intitule_officiel": {
 			Type:        genai.TypeString,
