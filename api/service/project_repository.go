@@ -22,6 +22,7 @@ type ProjectRepository interface {
 	UpdateCompanyProfile(profile *model.CompanyProfile) error
 	AddCompanyDocument(doc *model.CompanyDocument) error
 	UpdateCompanyDocument(doc *model.CompanyDocument) error
+	DeleteCompanyDocument(id string) error
 	ListCompanyDocuments() ([]model.CompanyDocument, error)
 }
 
@@ -114,6 +115,10 @@ func (r *GormProjectRepository) AddCompanyDocument(doc *model.CompanyDocument) e
 
 func (r *GormProjectRepository) UpdateCompanyDocument(doc *model.CompanyDocument) error {
 	return r.db.Save(doc).Error
+}
+
+func (r *GormProjectRepository) DeleteCompanyDocument(id string) error {
+	return r.db.Delete(&model.CompanyDocument{}, "id = ?", id).Error
 }
 
 func (r *GormProjectRepository) ListCompanyDocuments() ([]model.CompanyDocument, error) {
@@ -258,6 +263,13 @@ func (r *MemoryProjectRepository) UpdateCompanyDocument(doc *model.CompanyDocume
 	defer r.mu.Unlock()
 	doc.UpdatedAt = time.Now()
 	r.companyDocs[doc.ID] = doc
+	return nil
+}
+
+func (r *MemoryProjectRepository) DeleteCompanyDocument(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.companyDocs, id)
 	return nil
 }
 

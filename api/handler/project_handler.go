@@ -697,6 +697,24 @@ func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 					doc.MetadonneesJSON = string(metaBytes)
 				}
 			}
+		} else if typeDoc == model.DocAttestation && f.Id != "" {
+			if parsed, parseErr := h.parseAdminDocContent(c.Request.Context(), token, f.Id, f.Name); parseErr == nil && parsed != nil {
+				if parsed.IntituleOfficiel != "" {
+					doc.Titre = parsed.IntituleOfficiel
+				}
+				doc.Description = fmt.Sprintf("[%s] %s - %s", parsed.OrganismeEmetteur, parsed.IntituleOfficiel, parsed.Commentaire)
+				if parsed.DateExpiration != "" {
+					for _, layout := range []string{"2006-01-02", "02/01/2006", time.RFC3339} {
+						if exp, pErr := time.Parse(layout, parsed.DateExpiration); pErr == nil {
+							doc.DateExpiration = &exp
+							break
+						}
+					}
+				}
+				if metaBytes, mErr := json.Marshal(parsed); mErr == nil {
+					doc.MetadonneesJSON = string(metaBytes)
+				}
+			}
 		}
 
 		if err := h.projectRepo.AddCompanyDocument(doc); err == nil {
@@ -754,6 +772,24 @@ func (h *ProjectHandler) SyncCompanyDriveDocuments(c *gin.Context) {
 						doc.Titre = fmt.Sprintf("CV %s", parsed.NomComplet)
 					}
 					doc.Description = fmt.Sprintf("[%s] %s (%d ans d'exp.) - %s", parsed.SpecialitePrincipale, parsed.NomComplet, parsed.ExperienceAnnees, parsed.ResumeAnalytique)
+					if metaBytes, mErr := json.Marshal(parsed); mErr == nil {
+						doc.MetadonneesJSON = string(metaBytes)
+					}
+				}
+			} else if (subName == "01_Juridique_et_Fiscal" || typeDoc == model.DocAttestation) && f.Id != "" {
+				if parsed, parseErr := h.parseAdminDocContent(c.Request.Context(), token, f.Id, f.Name); parseErr == nil && parsed != nil {
+					if parsed.IntituleOfficiel != "" {
+						doc.Titre = parsed.IntituleOfficiel
+					}
+					doc.Description = fmt.Sprintf("[%s] %s - %s", parsed.OrganismeEmetteur, parsed.IntituleOfficiel, parsed.Commentaire)
+					if parsed.DateExpiration != "" {
+						for _, layout := range []string{"2006-01-02", "02/01/2006", time.RFC3339} {
+							if exp, pErr := time.Parse(layout, parsed.DateExpiration); pErr == nil {
+								doc.DateExpiration = &exp
+								break
+							}
+						}
+					}
 					if metaBytes, mErr := json.Marshal(parsed); mErr == nil {
 						doc.MetadonneesJSON = string(metaBytes)
 					}
@@ -892,7 +928,38 @@ func (h *ProjectHandler) parseCVContent(ctx context.Context, token *oauth2.Token
 	return &parsed, nil
 }
 
-// AnalyzeCompanyCV gère POST /api/company/documents/:id/analyze (analyse d'un CV existant)
+// parseAdminDocContent télécharge le fichier (scan JPG, PNG ou PDF) depuis Google Drive et extrait les informations officielles et la date de validité via Gemini Vision
+func (h *ProjectHandler) parseAdminDocContent(ctx context.Context, token *oauth2.Token, driveID string, fileName string) (*service.ExtractedAdminDocProfile, error) {
+	bytes, mime, err := h.driveService.DownloadFile(ctx, token, driveID)
+	if err != nil {
+		return nil, fmt.Errorf("téléchargement Drive impossible: %w", err)
+	}
+	if len(bytes) == 0 {
+		return nil, fmt.Errorf("fichier vide")
+	}
+
+	doc := service.Document{
+		Name:     fileName,
+		Bytes:    bytes,
+		MimeType: mime,
+	}
+
+	instruction := "Analyse rigoureusement ce scan officiel de pièce administrative / fiscale. Identifie la nature du document (QUITUS_FISCAL, IPRES, CSS, INSPECTION_TRAVAIL), son intitulé officiel précis, son organisme émetteur, et SURTOUT la date d'expiration ou de fin de validité au format strict AAAA-MM-JJ."
+
+	rawJSON, err := h.agentService.ExecuteAgentTask(ctx, service.AdminDocParserAgent, []service.Document{doc}, instruction)
+	if err != nil {
+		return nil, fmt.Errorf("erreur analyse Gemini: %w", err)
+	}
+
+	var parsed service.ExtractedAdminDocProfile
+	if err := json.Unmarshal([]byte(rawJSON), &parsed); err != nil {
+		return nil, fmt.Errorf("décodage extraction administrative impossible: %w", err)
+	}
+
+	return &parsed, nil
+}
+
+// AnalyzeCompanyCV gère POST /api/company/documents/:id/analyze (analyse intelligente par IA d'un document: CV ou Scan administratif)
 func (h *ProjectHandler) AnalyzeCompanyCV(c *gin.Context) {
 	token := h.requireToken(c)
 	if token == nil {
@@ -925,17 +992,62 @@ func (h *ProjectHandler) AnalyzeCompanyCV(c *gin.Context) {
 		return
 	}
 
-	parsed, err := h.parseCVContent(c.Request.Context(), token, targetDoc.GoogleDriveID, targetDoc.FileName)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Erreur analyse CV: %v", err)})
+	lower := strings.ToLower(targetDoc.FileName + " " + targetDoc.Titre)
+	isCV := targetDoc.TypeDoc == model.DocCV || strings.Contains(lower, "cv") || strings.Contains(lower, "expert") || strings.Contains(lower, "curriculum")
+
+	if isCV {
+		parsed, err := h.parseCVContent(c.Request.Context(), token, targetDoc.GoogleDriveID, targetDoc.FileName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Erreur analyse CV: %v", err)})
+			return
+		}
+
+		if parsed.NomComplet != "" {
+			targetDoc.Titre = fmt.Sprintf("CV %s", parsed.NomComplet)
+		}
+		targetDoc.TypeDoc = model.DocCV
+		targetDoc.Description = fmt.Sprintf("[%s] %s (%d ans d'exp.) - %s", parsed.SpecialitePrincipale, parsed.NomComplet, parsed.ExperienceAnnees, parsed.ResumeAnalytique)
+		if metaBytes, err := json.Marshal(parsed); err == nil {
+			targetDoc.MetadonneesJSON = string(metaBytes)
+		}
+		targetDoc.UpdatedAt = time.Now()
+
+		if err := h.projectRepo.UpdateCompanyDocument(targetDoc); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Erreur sauvegarde document: %v", err)})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  fmt.Sprintf("CV de %s analysé et indexé avec succès (%s)", parsed.NomComplet, parsed.SpecialitePrincipale),
+			"document": targetDoc,
+			"profile":  parsed,
+		})
 		return
 	}
 
-	if parsed.NomComplet != "" {
-		targetDoc.Titre = fmt.Sprintf("CV %s", parsed.NomComplet)
+	// Analyse scan administratif (Quitus fiscal, IPRES, CSS, IT, etc.)
+	parsed, err := h.parseAdminDocContent(c.Request.Context(), token, targetDoc.GoogleDriveID, targetDoc.FileName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Erreur analyse scan administratif: %v", err)})
+		return
 	}
-	targetDoc.TypeDoc = model.DocCV
-	targetDoc.Description = fmt.Sprintf("[%s] %s (%d ans d'exp.) - %s", parsed.SpecialitePrincipale, parsed.NomComplet, parsed.ExperienceAnnees, parsed.ResumeAnalytique)
+
+	if parsed.IntituleOfficiel != "" {
+		targetDoc.Titre = parsed.IntituleOfficiel
+	}
+	targetDoc.TypeDoc = model.DocAttestation
+	if parsed.TypeDocument == "NINEA" || parsed.TypeDocument == "RCCM" {
+		targetDoc.TypeDoc = model.DocAutre
+	}
+	targetDoc.Description = fmt.Sprintf("[%s] %s - %s", parsed.OrganismeEmetteur, parsed.IntituleOfficiel, parsed.Commentaire)
+	if parsed.DateExpiration != "" {
+		for _, layout := range []string{"2006-01-02", "02/01/2006", time.RFC3339} {
+			if exp, pErr := time.Parse(layout, parsed.DateExpiration); pErr == nil {
+				targetDoc.DateExpiration = &exp
+				break
+			}
+		}
+	}
 	if metaBytes, err := json.Marshal(parsed); err == nil {
 		targetDoc.MetadonneesJSON = string(metaBytes)
 	}
@@ -946,11 +1058,99 @@ func (h *ProjectHandler) AnalyzeCompanyCV(c *gin.Context) {
 		return
 	}
 
+	expText := "Non précisée"
+	if targetDoc.DateExpiration != nil {
+		expText = targetDoc.DateExpiration.Format("02/01/2006")
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":  fmt.Sprintf("CV de %s analysé et indexé avec succès (%s)", parsed.NomComplet, parsed.SpecialitePrincipale),
+		"message":  fmt.Sprintf("%s analysé avec succès (Expire le : %s)", targetDoc.Titre, expText),
 		"document": targetDoc,
 		"profile":  parsed,
 	})
+}
+
+// AnalyzeAllCompanyAdminDocs gère POST /api/company/analyze-all-admin (analyse tous les scans administratifs)
+func (h *ProjectHandler) AnalyzeAllCompanyAdminDocs(c *gin.Context) {
+	token := h.requireToken(c)
+	if token == nil {
+		return
+	}
+
+	docs, err := h.projectRepo.ListCompanyDocuments()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lecture documents"})
+		return
+	}
+
+	analyzedCount := 0
+	var results []gin.H
+
+	for _, d := range docs {
+		lower := strings.ToLower(d.FileName + " " + d.Titre)
+		isCV := d.TypeDoc == model.DocCV || strings.Contains(lower, "cv")
+		if isCV || d.GoogleDriveID == "" {
+			continue
+		}
+
+		parsed, err := h.parseAdminDocContent(c.Request.Context(), token, d.GoogleDriveID, d.FileName)
+		if err != nil {
+			fmt.Printf("Erreur analyse scan admin %s: %v\n", d.FileName, err)
+			continue
+		}
+
+		docCopy := d
+		if parsed.IntituleOfficiel != "" {
+			docCopy.Titre = parsed.IntituleOfficiel
+		}
+		docCopy.TypeDoc = model.DocAttestation
+		if parsed.TypeDocument == "NINEA" || parsed.TypeDocument == "RCCM" {
+			docCopy.TypeDoc = model.DocAutre
+		}
+		docCopy.Description = fmt.Sprintf("[%s] %s - %s", parsed.OrganismeEmetteur, parsed.IntituleOfficiel, parsed.Commentaire)
+		if parsed.DateExpiration != "" {
+			for _, layout := range []string{"2006-01-02", "02/01/2006", time.RFC3339} {
+				if exp, pErr := time.Parse(layout, parsed.DateExpiration); pErr == nil {
+					docCopy.DateExpiration = &exp
+					break
+				}
+			}
+		}
+		if metaBytes, err := json.Marshal(parsed); err == nil {
+			docCopy.MetadonneesJSON = string(metaBytes)
+		}
+		docCopy.UpdatedAt = time.Now()
+
+		if err := h.projectRepo.UpdateCompanyDocument(&docCopy); err == nil {
+			analyzedCount++
+			expFormatted := "Inconnue"
+			if docCopy.DateExpiration != nil {
+				expFormatted = docCopy.DateExpiration.Format("02/01/2006")
+			}
+			results = append(results, gin.H{
+				"id":         docCopy.ID,
+				"titre":      docCopy.Titre,
+				"organisme":  parsed.OrganismeEmetteur,
+				"expiration": expFormatted,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":        fmt.Sprintf("%d document(s) administratif(s) analysé(s) avec extraction de validité", analyzedCount),
+		"analyzed_count": analyzedCount,
+		"results":        results,
+	})
+}
+
+// DeleteCompanyDocument gère DELETE /api/company/documents/:id
+func (h *ProjectHandler) DeleteCompanyDocument(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.projectRepo.DeleteCompanyDocument(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Erreur suppression: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Document supprimé avec succès."})
 }
 
 // AnalyzeAllCompanyCVs gère POST /api/company/analyze-all-cvs (analyse en lot de tous les CVs)

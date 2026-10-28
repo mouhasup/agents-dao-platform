@@ -213,6 +213,58 @@ type ExtractedCVProfile struct {
 	ResumeAnalytique     string   `json:"resume_analytique"`
 }
 
+// ExtractedAdminDocProfile structure les informations extraites d'un scan administratif ou fiscal
+type ExtractedAdminDocProfile struct {
+	TypeDocument      string `json:"type_document"`      // "QUITUS_FISCAL", "IPRES", "CSS", "INSPECTION_TRAVAIL", "NINEA", "RCCM", "AUTRE"
+	IntituleOfficiel  string `json:"intitule_officiel"`  // ex: "Quitus Fiscal (Attestation de Régularité Fiscale DGID)"
+	OrganismeEmetteur string `json:"organisme_emetteur"` // ex: "DGID", "IPRES", "Caisse de Sécurité Sociale (CSS)", "Inspection du Travail"
+	Beneficiaire      string `json:"beneficiaire"`       // Raison sociale ou NINEA
+	DateEmission      string `json:"date_emission"`      // Format AAAA-MM-JJ
+	DateExpiration    string `json:"date_expiration"`    // Format AAAA-MM-JJ (obligatoire : date limite ou fin de trimestre)
+	EstValide         bool   `json:"est_valide"`
+	Commentaire       string `json:"commentaire"`
+}
+
+// AdminDocParserSchema : schéma pour l'analyse OCR et sémantique de scans administratifs (JPG, PNG, PDF)
+var AdminDocParserSchema = &genai.Schema{
+	Type: genai.TypeObject,
+	Properties: map[string]*genai.Schema{
+		"type_document": {
+			Type:        genai.TypeString,
+			Description: "Type exact du document: QUITUS_FISCAL, IPRES, CSS, INSPECTION_TRAVAIL, NINEA, RCCM, ou AUTRE",
+		},
+		"intitule_officiel": {
+			Type:        genai.TypeString,
+			Description: "Intitulé officiel complet (ex: Quitus Fiscal (Attestation de Régularité Fiscale DGID), Attestation de Régularité IPRES)",
+		},
+		"organisme_emetteur": {
+			Type:        genai.TypeString,
+			Description: "Organisme émetteur (ex: DGID, IPRES, CSS, Inspection du Travail)",
+		},
+		"beneficiaire": {
+			Type:        genai.TypeString,
+			Description: "Nom de l'entreprise ou contribuable figurant sur la pièce",
+		},
+		"date_emission": {
+			Type:        genai.TypeString,
+			Description: "Date d'émission au format AAAA-MM-JJ (ou vide si absente)",
+		},
+		"date_expiration": {
+			Type:        genai.TypeString,
+			Description: "Date de fin de validité ou d'expiration AU FORMAT STRICT AAAA-MM-JJ (cherche 'valable jusqu au', 'expire le', ou fin de période trimestrielle)",
+		},
+		"est_valide": {
+			Type:        genai.TypeBoolean,
+			Description: "true si l'attestation est toujours valide",
+		},
+		"commentaire": {
+			Type:        genai.TypeString,
+			Description: "Brève synthèse de la régularité et de la période couverte",
+		},
+	},
+	Required: []string{"type_document", "intitule_officiel", "date_expiration", "commentaire"},
+}
+
 // CVParserSchema : schéma pour l'analyse et l'extraction sémantique d'un CV PDF
 var CVParserSchema = &genai.Schema{
 	Type: genai.TypeObject,

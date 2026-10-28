@@ -20,6 +20,8 @@ import {
   ShieldCheck,
   FolderCheck,
   RefreshCw,
+  Trash2,
+  Scan,
 } from "lucide-react";
 
 export default function CompanySettingsPage() {
@@ -32,6 +34,7 @@ export default function CompanySettingsPage() {
   const [syncingDrive, setSyncingDrive] = useState(false);
   const [organizingVault, setOrganizingVault] = useState(false);
   const [analyzingAllCVs, setAnalyzingAllCVs] = useState(false);
+  const [analyzingAllAdmin, setAnalyzingAllAdmin] = useState(false);
   const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null);
   const [workspaceMsg, setWorkspaceMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
@@ -156,7 +159,29 @@ export default function CompanySettingsPage() {
     }
   };
 
-  const handleAnalyzeSingleCV = async (docId: string) => {
+  const handleAnalyzeAllAdmin = async () => {
+    setAnalyzingAllAdmin(true);
+    setWorkspaceMsg(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/company/analyze-all-admin`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWorkspaceMsg({ text: data.message });
+        await fetchProfile();
+      } else {
+        setWorkspaceMsg({ text: data.error || "Erreur lors de l'analyse des pièces administratives.", error: true });
+      }
+    } catch {
+      setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
+    } finally {
+      setAnalyzingAllAdmin(false);
+    }
+  };
+
+  const handleAnalyzeSingleDoc = async (docId: string) => {
     setAnalyzingDocId(docId);
     setWorkspaceMsg(null);
     try {
@@ -169,12 +194,31 @@ export default function CompanySettingsPage() {
         setWorkspaceMsg({ text: data.message });
         await fetchProfile();
       } else {
-        setWorkspaceMsg({ text: data.error || "Erreur lors de l'analyse du CV.", error: true });
+        setWorkspaceMsg({ text: data.error || "Erreur lors de l'analyse du document.", error: true });
       }
     } catch {
       setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
     } finally {
       setAnalyzingDocId(null);
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string, titre: string) => {
+    if (!confirm(`Supprimer définitivement "${titre}" du coffre-fort ?`)) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/company/documents/${docId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWorkspaceMsg({ text: data.message || "Document supprimé avec succès." });
+        await fetchProfile();
+      } else {
+        setWorkspaceMsg({ text: data.error || "Erreur lors de la suppression.", error: true });
+      }
+    } catch {
+      setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
     }
   };
 
@@ -367,12 +411,23 @@ export default function CompanySettingsPage() {
                 <button
                   type="button"
                   onClick={handleAnalyzeAllCVs}
-                  disabled={analyzingAllCVs || syncingDrive}
+                  disabled={analyzingAllCVs || syncingDrive || organizingVault || analyzingAllAdmin}
                   title="Lire le contenu de tous les CVs déposés sur Drive et indexer leurs compétences pour les DAO"
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/25 disabled:opacity-50"
                 >
                   <Sparkles size={14} className={analyzingAllCVs ? "animate-spin text-amber-300" : "text-amber-300"} />
                   <span>{analyzingAllCVs ? "Lecture IA des CVs..." : "Analyser tous les CVs par l'IA"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAnalyzeAllAdmin}
+                  disabled={analyzingAllAdmin || syncingDrive || organizingVault || analyzingAllCVs}
+                  title="Lire par OCR / Vision multimodal les scans administratifs (Quitus, IPRES, CSS, IT) et extraire dates et émetteurs"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-amber-600/25 disabled:opacity-50"
+                >
+                  <Scan size={14} className={analyzingAllAdmin ? "animate-spin text-amber-200" : "text-amber-200"} />
+                  <span>{analyzingAllAdmin ? "Analyse OCR en cours..." : "Analyser les Scans Administratifs"}</span>
                 </button>
 
                 <a
@@ -654,6 +709,21 @@ export default function CompanySettingsPage() {
                         </div>
                       )}
 
+                      {meta?.organisme_emetteur && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            <ShieldCheck size={10} className="text-amber-600" />
+                            {meta.organisme_emetteur}
+                          </span>
+                          {meta.periode_validite ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                              <Clock size={10} className="text-slate-500" />
+                              {meta.periode_validite}
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+
                       {doc.description && (
                         <p className="text-xs text-slate-600 mt-2 line-clamp-3 leading-relaxed bg-slate-50 p-2 rounded-lg border border-slate-100">
                           {doc.description}
@@ -668,45 +738,62 @@ export default function CompanySettingsPage() {
                   </div>
 
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
-                    {doc.type_doc === "CV_EXPERT" && doc.google_drive_id ? (
+                    <div className="flex items-center gap-1.5">
+                      {doc.google_drive_id ? (
+                        <button
+                          type="button"
+                          onClick={() => handleAnalyzeSingleDoc(doc.id)}
+                          disabled={analyzingDocId === doc.id || analyzingAllCVs || analyzingAllAdmin}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors disabled:opacity-50 cursor-pointer"
+                          title={doc.type_doc === "CV_EXPERT" ? "Lire le CV complet avec Gemini" : "Lire le scan administratif et extraire la date d'expiration"}
+                        >
+                          {analyzingDocId === doc.id ? (
+                            <>
+                              <RefreshCw size={11} className="animate-spin text-indigo-600" />
+                              <span>Lecture IA...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={11} className="text-amber-500" />
+                              <span>
+                                {doc.type_doc === "CV_EXPERT"
+                                  ? (meta?.specialite_principale ? "Ré-analyser" : "Analyser CV")
+                                  : (doc.date_expiration ? "Ré-analyser Scan" : "Analyser Scan IA")}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {new Date(doc.created_at).toLocaleDateString("fr-FR")}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {doc.web_view_link ? (
+                        <a
+                          href={doc.web_view_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                        >
+                          <span>Drive</span>
+                          <ExternalLink size={12} />
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">Métadonnée locale</span>
+                      )}
+
                       <button
                         type="button"
-                        onClick={() => handleAnalyzeSingleCV(doc.id)}
-                        disabled={analyzingDocId === doc.id || analyzingAllCVs}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors disabled:opacity-50 cursor-pointer"
-                        title="Lire le fichier PDF complet avec Gemini et extraire les diplômes et compétences"
+                        onClick={() => handleDeleteDocument(doc.id, doc.titre)}
+                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        title="Supprimer cette pièce du coffre-fort"
                       >
-                        {analyzingDocId === doc.id ? (
-                          <>
-                            <RefreshCw size={11} className="animate-spin text-indigo-600" />
-                            <span>Lecture IA...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={11} className="text-amber-500" />
-                            <span>{meta?.specialite_principale ? "Ré-analyser" : "Analyser par l'IA"}</span>
-                          </>
-                        )}
+                        <Trash2 size={13} />
                       </button>
-                    ) : (
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {new Date(doc.created_at).toLocaleDateString("fr-FR")}
-                      </span>
-                    )}
-
-                    {doc.web_view_link ? (
-                      <a
-                        href={doc.web_view_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
-                      >
-                        <span>Voir sur Drive</span>
-                        <ExternalLink size={12} />
-                      </a>
-                    ) : (
-                      <span className="text-[11px] text-slate-400">Métadonnée locale</span>
-                    )}
+                    </div>
                   </div>
                 </div>
               );
