@@ -61,6 +61,7 @@ func SetupRouter(hm *handler.HandlerManager, sm *service.ServiceManager, cfg *co
 		api.PUT("/company/documents/:id", hm.Project.UpdateCompanyDocument)
 		api.DELETE("/company/documents/:id", hm.Project.DeleteCompanyDocument)
 		api.POST("/company/documents/:id/analyze", hm.Project.AnalyzeCompanyCV)
+		api.POST("/company/analyze-all", hm.Project.AnalyzeAllCompanyVault)
 		api.POST("/company/analyze-all-cvs", hm.Project.AnalyzeAllCompanyCVs)
 		api.POST("/company/analyze-all-admin", hm.Project.AnalyzeAllCompanyAdminDocs)
 		api.POST("/company/documents/upload", hm.Project.UploadCompanyDocument)

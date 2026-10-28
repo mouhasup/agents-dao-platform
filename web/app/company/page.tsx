@@ -33,8 +33,7 @@ export default function CompanySettingsPage() {
   const [initializingWorkspace, setInitializingWorkspace] = useState(false);
   const [syncingDrive, setSyncingDrive] = useState(false);
   const [organizingVault, setOrganizingVault] = useState(false);
-  const [analyzingAllCVs, setAnalyzingAllCVs] = useState(false);
-  const [analyzingAllAdmin, setAnalyzingAllAdmin] = useState(false);
+  const [analyzingAllVault, setAnalyzingAllVault] = useState(false);
   const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null);
   const [workspaceMsg, setWorkspaceMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
@@ -137,11 +136,11 @@ export default function CompanySettingsPage() {
     }
   };
 
-  const handleAnalyzeAllCVs = async () => {
-    setAnalyzingAllCVs(true);
+  const handleAnalyzeAllVault = async () => {
+    setAnalyzingAllVault(true);
     setWorkspaceMsg(null);
     try {
-      const res = await fetch(`${apiUrl}/api/company/analyze-all-cvs`, {
+      const res = await fetch(`${apiUrl}/api/company/analyze-all`, {
         method: "POST",
         credentials: "include",
       });
@@ -150,34 +149,12 @@ export default function CompanySettingsPage() {
         setWorkspaceMsg({ text: data.message });
         await fetchProfile();
       } else {
-        setWorkspaceMsg({ text: data.error || "Erreur lors de l'analyse des CVs.", error: true });
+        setWorkspaceMsg({ text: data.error || "Erreur lors de l'analyse du coffre-fort.", error: true });
       }
     } catch {
       setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
     } finally {
-      setAnalyzingAllCVs(false);
-    }
-  };
-
-  const handleAnalyzeAllAdmin = async () => {
-    setAnalyzingAllAdmin(true);
-    setWorkspaceMsg(null);
-    try {
-      const res = await fetch(`${apiUrl}/api/company/analyze-all-admin`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setWorkspaceMsg({ text: data.message });
-        await fetchProfile();
-      } else {
-        setWorkspaceMsg({ text: data.error || "Erreur lors de l'analyse des pièces administratives.", error: true });
-      }
-    } catch {
-      setWorkspaceMsg({ text: "Erreur de communication avec l'API.", error: true });
-    } finally {
-      setAnalyzingAllAdmin(false);
+      setAnalyzingAllVault(false);
     }
   };
 
@@ -389,7 +366,7 @@ export default function CompanySettingsPage() {
                 <button
                   type="button"
                   onClick={handleSyncDrive}
-                  disabled={syncingDrive || analyzingAllCVs || organizingVault}
+                  disabled={syncingDrive || analyzingAllVault || organizingVault}
                   title="Scanner le dossier 01_COFFRE_FORT_ENTREPRISE sur Google Drive et importer automatiquement les CVs et documents"
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all cursor-pointer shadow-sm disabled:opacity-50"
                 >
@@ -400,7 +377,7 @@ export default function CompanySettingsPage() {
                 <button
                   type="button"
                   onClick={handleOrganizeVault}
-                  disabled={organizingVault || syncingDrive || analyzingAllCVs}
+                  disabled={organizingVault || syncingDrive || analyzingAllVault}
                   title="Créer automatiquement les 5 sous-dossiers thématiques sur Drive et y classer toutes les pièces du coffre-fort"
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all cursor-pointer shadow-sm disabled:opacity-50"
                 >
@@ -410,24 +387,13 @@ export default function CompanySettingsPage() {
 
                 <button
                   type="button"
-                  onClick={handleAnalyzeAllCVs}
-                  disabled={analyzingAllCVs || syncingDrive || organizingVault || analyzingAllAdmin}
-                  title="Lire le contenu de tous les CVs déposés sur Drive et indexer leurs compétences pour les DAO"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/25 disabled:opacity-50"
+                  onClick={handleAnalyzeAllVault}
+                  disabled={analyzingAllVault || syncingDrive || organizingVault}
+                  title="Analyser automatiquement toutes les pièces du coffre-fort : profils et compétences des CVs, et reconnaissance optique (OCR) des dates de validité pour les pièces administratives."
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/30 disabled:opacity-50"
                 >
-                  <Sparkles size={14} className={analyzingAllCVs ? "animate-spin text-amber-300" : "text-amber-300"} />
-                  <span>{analyzingAllCVs ? "Lecture IA des CVs..." : "Analyser tous les CVs par l'IA"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleAnalyzeAllAdmin}
-                  disabled={analyzingAllAdmin || syncingDrive || organizingVault || analyzingAllCVs}
-                  title="Lire par OCR / Vision multimodal les scans administratifs (Quitus, IPRES, CSS, IT) et extraire dates et émetteurs"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md shadow-amber-600/25 disabled:opacity-50"
-                >
-                  <Scan size={14} className={analyzingAllAdmin ? "animate-spin text-amber-200" : "text-amber-200"} />
-                  <span>{analyzingAllAdmin ? "Analyse OCR en cours..." : "Analyser les Scans Administratifs"}</span>
+                  <Sparkles size={14} className={analyzingAllVault ? "animate-spin text-amber-300" : "text-amber-300"} />
+                  <span>{analyzingAllVault ? "Analyse IA de tout le coffre-fort..." : "Analyser tout le Coffre-fort par l'IA"}</span>
                 </button>
 
                 <a
@@ -743,7 +709,7 @@ export default function CompanySettingsPage() {
                         <button
                           type="button"
                           onClick={() => handleAnalyzeSingleDoc(doc.id)}
-                          disabled={analyzingDocId === doc.id || analyzingAllCVs || analyzingAllAdmin}
+                          disabled={analyzingDocId === doc.id || analyzingAllVault}
                           className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors disabled:opacity-50 cursor-pointer"
                           title={doc.type_doc === "CV_EXPERT" ? "Lire le CV complet avec Gemini" : "Lire le scan administratif et extraire la date d'expiration"}
                         >
